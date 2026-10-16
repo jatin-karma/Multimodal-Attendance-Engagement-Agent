@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Storage / Generated Files
+storage/attendance_logs/*.json
+storage/attendance_logs/*.csv
+storage/generated_audio/*.wav
+storage/generated_audio/*.mp3
+storage/generated_code/*.py
+uploads/*
+!uploads/.gitkeep
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log

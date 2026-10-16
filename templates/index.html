@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <div class="hero-content">
+        <h1>Multimodal Attendance &amp; Engagement Agent</h1>
+        <p class="hero-subtitle">
+            AI-powered, privacy-preserving classroom intelligence system that tracks attendance, 
+            analyzes engagement, and generates actionable teaching insights.
+        </p>
+        <div class="hero-actions">
+            <a href="/dashboard" class="btn btn-primary" id="btn-dashboard">Open Dashboard</a>
+            <a href="/api/status" class="btn btn-secondary" id="btn-status">System Status</a>
+        </div>
+    </div>
+</section>
+
+<section class="features">
+    <h2>Core Capabilities</h2>
+    <div class="feature-grid">
+        <div class="feature-card" id="feature-attendance">
+            <div class="feature-icon">📸</div>
+            <h3>Automated Attendance</h3>
+            <p>Face detection with sustained presence logic for accurate, automated attendance tracking.</p>
+        </div>
+        <div class="feature-card" id="feature-engagement">
+            <div class="feature-icon">📊</div>
+            <h3>Engagement Analysis</h3>
+            <p>Multimodal fusion of visual and audio signals to estimate real-time student engagement.</p>
+        </div>
+        <div class="feature-card" id="feature-suggestions">
+            <div class="feature-icon">🤖</div>
+            <h3>AI Suggestions</h3>
+            <p>Context-aware teaching recommendations powered by Google Gemini 2.0 Flash.</p>
+        </div>
+        <div class="feature-card" id="feature-analytics">
+            <div class="feature-icon">📈</div>
+            <h3>Student Analytics</h3>
+            <p>Per-student session summaries with engagement trends and participation scores.</p>
+        </div>
+    </div>
+</section>
+
+<section class="upload-section">
+    <h2>Quick Start</h2>
+    <div class="upload-area" id="upload-area">
+        <div class="upload-icon">📁</div>
+        <p>Upload a video or audio file to begin analysis</p>
+        <p class="upload-hint">Supported: MP4, AVI, MOV, WAV, MP3</p>
+        <input type="file" id="file-input" accept="video/*,audio/*" hidden>
+        <button class="btn btn-primary" id="btn-upload" onclick="document.getElementById('file-input').click()">
+            Choose File
+        </button>
+    </div>
+</section>
+{% endblock %}
