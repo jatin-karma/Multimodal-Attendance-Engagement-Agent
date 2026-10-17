@@ -5,7 +5,13 @@ Provides helper functions for interacting with the Google Gemini 2.0 Flash API
 for generating teaching suggestions, engagement insights, and analytics reports.
 """
 
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+    HAS_GENAI = True
+except ImportError:
+    genai = None
+    HAS_GENAI = False
+
 from config import GEMINI_CONFIG
 
 
@@ -17,8 +23,14 @@ def initialize_gemini():
         genai.GenerativeModel: Configured Gemini model instance.
         
     Raises:
+        ImportError: If google-generativeai is not installed.
         ValueError: If GEMINI_API_KEY is not set.
     """
+    if not HAS_GENAI:
+        raise ImportError(
+            "google-generativeai package is not installed. Install via pip install google-generativeai"
+        )
+
     api_key = GEMINI_CONFIG["api_key"]
     if not api_key:
         raise ValueError(
