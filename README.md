@@ -100,11 +100,19 @@ UPLOAD_FOLDER=uploads
 ### Running the Application
 
 ```bash
-# Run the Flask application
-python app.py
+# Option 1: One-Click Windows Launcher (Starts Flask & opens browser)
+.\start.bat
 
-# Run the Streamlit dashboard (optional)
-streamlit run dashboard.py
+# Option 2: Run the Flask API Gateway & Web Interface
+python app.py
+# Open: http://localhost:5000 or http://localhost:5000/dashboard
+
+# Option 3: Run the Streamlit Analytics Dashboard
+python -m streamlit run dashboard.py
+# (or: streamlit run dashboard.py)
+
+# Option 4: Run the Automated Real-Time Live Webcam & Audio Session
+python run_live.py
 ```
 
 ## 📋 Milestones
