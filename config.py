@@ -76,7 +76,7 @@ ENGAGEMENT_CONFIG = {
 # ============================================
 GEMINI_CONFIG = {
     "api_key": os.getenv("GEMINI_API_KEY", ""),
-    "model_name": "gemini-2.0-flash",
+    "model_name": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
     "max_output_tokens": 1024,
     "temperature": 0.7,
     "top_p": 0.9,

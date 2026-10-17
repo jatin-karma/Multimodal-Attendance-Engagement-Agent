@@ -85,11 +85,27 @@ def generate_teaching_suggestion(model, engagement_data):
     Keep suggestions concise and practical.
     """
     
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Unable to generate suggestions: {str(e)}"
+    # Try current model, then fallback models if 404 occurs
+    models_to_try = [model]
+    if HAS_GENAI:
+        for m_name in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+            if m_name != GEMINI_CONFIG["model_name"]:
+                try:
+                    models_to_try.append(genai.GenerativeModel(model_name=m_name))
+                except Exception:
+                    pass
+
+    last_error = None
+    for candidate_model in models_to_try:
+        try:
+            response = candidate_model.generate_content(prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    return f"Unable to generate suggestions: {str(last_error)}"
 
 
 def generate_student_summary(model, student_data):
@@ -116,8 +132,23 @@ def generate_student_summary(model, student_data):
     Provide a 2-3 sentence constructive summary. Be encouraging and specific.
     """
     
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Unable to generate summary: {str(e)}"
+    models_to_try = [model]
+    if HAS_GENAI:
+        for m_name in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+            if m_name != GEMINI_CONFIG["model_name"]:
+                try:
+                    models_to_try.append(genai.GenerativeModel(model_name=m_name))
+                except Exception:
+                    pass
+
+    last_error = None
+    for candidate_model in models_to_try:
+        try:
+            response = candidate_model.generate_content(prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    return f"Unable to generate summary: {str(last_error)}"
