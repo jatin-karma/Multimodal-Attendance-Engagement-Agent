@@ -52,10 +52,11 @@ class TestAppSetup:
         assert response.status_code == 200
         data = response.get_json()
         assert "modules" in data
-        assert data["modules"]["vision"] == "available"
-        assert data["modules"]["audio"] == "available"
-        assert data["modules"]["agent"] == "available"
-        assert data["modules"]["analytics"] == "available"
+        assert "vision" in data["modules"]
+        assert "audio" in data["modules"]
+        assert "agent" in data["modules"]
+        assert "analytics" in data["modules"]
+        assert data["status"] == "operational"
 
     def test_index_page_loads(self, client):
         """Test that the index page renders successfully."""

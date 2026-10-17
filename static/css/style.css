@@ -333,3 +333,230 @@ body {
         padding: 1rem;
     }
 }
+
+/* --- Dashboard Section --- */
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.dashboard-header .subtitle {
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    margin-top: 0.25rem;
+}
+
+/* --- KPI Cards Grid --- */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.25rem;
+    margin-bottom: 2rem;
+}
+
+.kpi-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    transition: transform var(--transition-normal);
+}
+
+.kpi-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-sm);
+}
+
+.kpi-icon {
+    font-size: 2.2rem;
+    padding: 0.75rem;
+    border-radius: 12px;
+    background: rgba(108, 99, 255, 0.1);
+}
+
+.kpi-value {
+    display: block;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+}
+
+.kpi-label {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* --- Dashboard Main Grid --- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+@media (max-width: 992px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.dash-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.card-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 0.75rem;
+}
+
+.badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    background: rgba(108, 99, 255, 0.2);
+    color: var(--color-accent-primary);
+    font-weight: 600;
+}
+
+.ai-box {
+    background: rgba(15, 15, 26, 0.6);
+    border-left: 4px solid var(--color-accent-secondary);
+    padding: 1rem 1.25rem;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+    color: var(--color-text-primary);
+}
+
+.suggestion-item {
+    background: rgba(26, 39, 66, 0.5);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.s-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.p-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+}
+
+.p-high {
+    background: rgba(255, 107, 107, 0.2);
+    color: var(--color-accent-warning);
+}
+
+.p-medium {
+    background: rgba(255, 165, 0, 0.2);
+    color: #ffa500;
+}
+
+.p-low {
+    background: rgba(0, 212, 170, 0.2);
+    color: var(--color-accent-secondary);
+}
+
+.suggestion-item p {
+    font-size: 0.88rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-text-secondary);
+}
+
+.rationale {
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+}
+
+.alert-chip {
+    background: rgba(255, 107, 107, 0.1);
+    border-left: 3px solid var(--color-accent-warning);
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+    color: #ff9b9b;
+}
+
+.placeholder-text {
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+/* --- Data Table --- */
+.table-responsive {
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.data-table th, .data-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+}
+
+.data-table th {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+
+.data-table tr:not(:last-child) td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.chip {
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.chip-green {
+    background: rgba(0, 212, 170, 0.15);
+    color: var(--color-accent-secondary);
+}
+
+.chip-orange {
+    background: rgba(255, 165, 0, 0.15);
+    color: #ffa500;
+}
+
+.class-label {
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+}
+

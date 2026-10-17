@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="dashboard-header">
+    <div>
+        <h2>Classroom Intelligence Dashboard</h2>
+        <p class="subtitle">Real-time attendance tracking, multimodal engagement analytics, and AI suggestions</p>
+    </div>
+    <div class="actions">
+        <button id="btn-run-analysis" class="btn btn-primary" onclick="triggerSessionAnalysis()">
+            ⚡ Run Session Analysis
+        </button>
+    </div>
+</section>
+
+<!-- KPI Cards -->
+<section class="kpi-grid">
+    <div class="kpi-card" id="kpi-attendance">
+        <div class="kpi-icon">📋</div>
+        <div class="kpi-data">
+            <span class="kpi-value" id="val-attendance">--</span>
+            <span class="kpi-label">Attendance Rate</span>
+        </div>
+    </div>
+    <div class="kpi-card" id="kpi-students">
+        <div class="kpi-icon">👥</div>
+        <div class="kpi-data">
+            <span class="kpi-value" id="val-students">--</span>
+            <span class="kpi-label">Present / Detected</span>
+        </div>
+    </div>
+    <div class="kpi-card" id="kpi-engagement">
+        <div class="kpi-icon">⚡</div>
+        <div class="kpi-data">
+            <span class="kpi-value" id="val-engagement">--</span>
+            <span class="kpi-label">Avg Engagement</span>
+        </div>
+    </div>
+    <div class="kpi-card" id="kpi-health">
+        <div class="kpi-icon">🎯</div>
+        <div class="kpi-data">
+            <span class="kpi-value" id="val-health">Ready</span>
+            <span class="kpi-label">Session State</span>
+        </div>
+    </div>
+</section>
+
+<!-- Main Dashboard Grid -->
+<div class="dashboard-grid">
+    <!-- Left Column: AI Suggestions & Dynamics -->
+    <div class="dashboard-column">
+        <div class="dash-card">
+            <div class="card-title">
+                <span>🤖 AI Teaching Suggestions</span>
+                <span class="badge" id="ai-source-badge">Engine Ready</span>
+            </div>
+            <div id="ai-narrative-box" class="ai-box">
+                Click "Run Session Analysis" above or upload video/audio to generate pedagogical suggestions.
+            </div>
+            <div id="suggestions-list" class="suggestions-container"></div>
+        </div>
+
+        <div class="dash-card">
+            <div class="card-title">
+                <span>⚠️ Session Dynamics &amp; Alerts</span>
+            </div>
+            <div id="dynamics-alerts" class="alerts-container">
+                <p class="placeholder-text">No alerts recorded yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Student Attendance & Profiles -->
+    <div class="dashboard-column">
+        <div class="dash-card">
+            <div class="card-title">
+                <span>📊 Student Engagement Profiles</span>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table" id="students-table">
+                    <thead>
+                        <tr>
+                            <th>Student ID</th>
+                            <th>Status</th>
+                            <th>Visible (s)</th>
+                            <th>Score</th>
+                            <th>Classification</th>
+                        </tr>
+                    </thead>
+                    <tbody id="students-table-body">
+                        <tr>
+                            <td colspan="5" class="text-center placeholder-text">Run analysis to view student attendance.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function triggerSessionAnalysis() {
+    const btn = document.getElementById('btn-run-analysis');
+    btn.disabled = true;
+    btn.textContent = '⏳ Analyzing...';
+
+    try {
+        const response = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({use_synthetic: true})
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            updateDashboardUI(data);
+            showNotification('Session analysis completed successfully!', 'success');
+        } else {
+            showNotification(data.error || 'Analysis failed', 'error');
+        }
+    } catch (e) {
+        showNotification('Analysis request error: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '⚡ Run Session Analysis';
+    }
+}
+
+function updateDashboardUI(data) {
+    const metrics = data.session_metrics;
+
+    // Update KPIs
+    document.getElementById('val-attendance').textContent = `${metrics.attendance_rate_percent}%`;
+    document.getElementById('val-students').textContent = `${metrics.confirmed_present} / ${metrics.total_detected_students}`;
+    document.getElementById('val-engagement').textContent = `${Math.round(metrics.average_engagement_score * 100)}%`;
+    document.getElementById('val-health').textContent = metrics.engagement_classification.toUpperCase();
+
+    // Update AI Suggestions
+    const suggestions = data.teaching_suggestions;
+    const aiBox = document.getElementById('ai-narrative-box');
+    const sourceBadge = document.getElementById('ai-source-badge');
+    sourceBadge.textContent = suggestions.source === 'gemini_ai' ? 'Google Gemini 2.0 Flash' : 'Rule-Based Engine';
+
+    if (suggestions.ai_insights) {
+        aiBox.textContent = suggestions.ai_insights;
+    } else {
+        aiBox.textContent = metrics.overall_diagnosis;
+    }
+
+    const list = document.getElementById('suggestions-list');
+    list.innerHTML = '';
+    (suggestions.structured_suggestions || []).forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'suggestion-item';
+        item.innerHTML = `
+            <div class="s-header">
+                <strong>${s.title}</strong>
+                <span class="p-badge p-${s.priority}">${s.priority.toUpperCase()}</span>
+            </div>
+            <p>${s.suggestion}</p>
+            <small class="rationale"><em>Rationale:</em> ${s.rationale}</small>
+        `;
+        list.appendChild(item);
+    });
+
+    // Update Dynamics Alerts
+    const alertsBox = document.getElementById('dynamics-alerts');
+    alertsBox.innerHTML = '';
+    const triggers = data.dynamics.rule_triggers || [];
+    if (triggers.length === 0) {
+        alertsBox.innerHTML = '<p class="placeholder-text">✅ No attention anomalies detected. Session is flowing smoothly.</p>';
+    } else {
+        triggers.forEach(t => {
+            const el = document.createElement('div');
+            el.className = 'alert-chip';
+            el.textContent = t;
+            alertsBox.appendChild(el);
+        });
+    }
+
+    // Update Students Table
+    const tbody = document.getElementById('students-table-body');
+    tbody.innerHTML = '';
+    (data.student_profiles || []).forEach(p => {
+        const row = document.createElement('tr');
+        const badgeClass = p.attendance_confirmed ? 'chip-green' : 'chip-orange';
+        row.innerHTML = `
+            <td><strong>${p.student_id}</strong></td>
+            <td><span class="chip ${badgeClass}">${p.attendance_confirmed ? 'Present' : 'Tracking'}</span></td>
+            <td>${p.visible_duration_seconds}s</td>
+            <td>${Math.round(p.engagement_score * 100)}%</td>
+            <td><span class="class-label">${p.classification}</span></td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+</script>
+{% endblock %}

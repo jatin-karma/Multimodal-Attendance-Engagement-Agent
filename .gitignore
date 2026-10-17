@@ -19,6 +19,8 @@ env/
 Thumbs.db
 
 # Storage / Generated Files
+storage/*.json
+storage/*.csv
 storage/attendance_logs/*.json
 storage/attendance_logs/*.csv
 storage/generated_audio/*.wav

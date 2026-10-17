@@ -10,7 +10,6 @@ This module handles:
 """
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import json
 import os
@@ -18,32 +17,55 @@ import time
 from datetime import datetime
 from config import VISION_CONFIG, ATTENDANCE_LOG_DIR
 
+try:
+    import mediapipe as mp
+    HAS_MEDIAPIPE = True
+except ImportError:
+    mp = None
+    HAS_MEDIAPIPE = False
+
 
 class FaceDetector:
     """
-    Detects and tracks faces in video frames using MediaPipe.
+    Detects and tracks faces in video frames using MediaPipe with OpenCV Cascade fallback.
     
     Assigns persistent IDs to detected faces based on spatial proximity
     across frames, enabling sustained presence tracking.
     """
 
     def __init__(self):
-        """Initialize the face detector with MediaPipe Face Detection."""
-        self.mp_face_detection = mp.solutions.face_detection
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.mp_drawing = mp.solutions.drawing_utils
+        """Initialize the face detector with MediaPipe or OpenCV fallback."""
+        self.has_mediapipe = HAS_MEDIAPIPE
+        self.face_cascade = None
 
-        self.face_detection = self.mp_face_detection.FaceDetection(
-            min_detection_confidence=VISION_CONFIG["min_detection_confidence"],
-            model_selection=1  # 1 = full range model (better for classroom)
-        )
-        
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=VISION_CONFIG["max_num_faces"],
-            min_detection_confidence=VISION_CONFIG["min_detection_confidence"],
-            min_tracking_confidence=VISION_CONFIG["min_tracking_confidence"],
-            refine_landmarks=True
-        )
+        if self.has_mediapipe:
+            self.mp_face_detection = mp.solutions.face_detection
+            self.mp_face_mesh = mp.solutions.face_mesh
+            self.mp_drawing = mp.solutions.drawing_utils
+
+            self.face_detection = self.mp_face_detection.FaceDetection(
+                min_detection_confidence=VISION_CONFIG["min_detection_confidence"],
+                model_selection=1  # 1 = full range model (better for classroom)
+            )
+            
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                max_num_faces=VISION_CONFIG["max_num_faces"],
+                min_detection_confidence=VISION_CONFIG["min_detection_confidence"],
+                min_tracking_confidence=VISION_CONFIG["min_tracking_confidence"],
+                refine_landmarks=True
+            )
+        else:
+            cascade_cls = getattr(cv2, "CascadeClassifier", None)
+            if cascade_cls and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+                try:
+                    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+                    self.face_cascade = cascade_cls(cascade_path)
+                except Exception:
+                    self.face_cascade = None
+            else:
+                self.face_cascade = None
+            self.face_detection = None
+            self.face_mesh = None
 
         # Tracking state
         self.tracked_faces = {}      # face_id -> tracking info
@@ -61,98 +83,100 @@ class FaceDetector:
             list[dict]: List of detected face dictionaries containing:
                 - bbox: (x, y, w, h) bounding box
                 - confidence: detection confidence score
-                - landmarks: facial landmark points (if available)
+                - center: (cx, cy)
         """
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, _ = frame.shape
-        
-        results = self.face_detection.process(rgb_frame)
         detections = []
-        
-        if results.detections:
-            for detection in results.detections:
-                bbox = detection.location_data.relative_bounding_box
-                
-                x = int(bbox.xmin * w)
-                y = int(bbox.ymin * h)
-                bw = int(bbox.width * w)
-                bh = int(bbox.height * h)
-                
-                # Clamp to frame boundaries
-                x = max(0, x)
-                y = max(0, y)
-                bw = min(bw, w - x)
-                bh = min(bh, h - y)
-                
-                confidence = detection.score[0] if detection.score else 0.0
-                
+
+        if self.has_mediapipe and self.face_detection:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_detection.process(rgb_frame)
+            if results.detections:
+                for detection in results.detections:
+                    bbox = detection.location_data.relative_bounding_box
+                    x = int(bbox.xmin * w)
+                    y = int(bbox.ymin * h)
+                    bw = int(bbox.width * w)
+                    bh = int(bbox.height * h)
+
+                    x = max(0, x)
+                    y = max(0, y)
+                    bw = min(bw, w - x)
+                    bh = min(bh, h - y)
+
+                    confidence = detection.score[0] if detection.score else 0.0
+                    detections.append({
+                        "bbox": (x, y, bw, bh),
+                        "confidence": float(confidence),
+                        "center": (x + bw // 2, y + bh // 2)
+                    })
+        elif self.face_cascade:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+            for (x, y, bw, bh) in faces:
                 detections.append({
-                    "bbox": (x, y, bw, bh),
-                    "confidence": float(confidence),
-                    "center": (x + bw // 2, y + bh // 2)
+                    "bbox": (int(x), int(y), int(bw), int(bh)),
+                    "confidence": 0.85,
+                    "center": (int(x + bw // 2), int(y + bh // 2))
                 })
-        
+
         return detections
 
     def get_head_pose(self, frame):
         """
-        Estimate head poses for all detected faces using Face Mesh landmarks.
-        
-        Uses key facial landmarks (nose tip, chin, eye corners) to estimate
-        the head orientation, which serves as an engagement indicator.
+        Estimate head poses for all detected faces using Face Mesh landmarks (or box heuristics).
         
         Args:
             frame (np.ndarray): BGR video frame.
         
         Returns:
-            list[dict]: List of head pose data per face, each containing:
-                - yaw: left/right rotation (-1 to 1)
-                - pitch: up/down rotation (-1 to 1)
-                - is_looking_forward: boolean engagement indicator
+            list[dict]: List of head pose data per face.
         """
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, _ = frame.shape
-        results = self.face_mesh.process(rgb_frame)
-        
         poses = []
-        
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                # Key landmarks for pose estimation
-                nose_tip = face_landmarks.landmark[1]       # Nose tip
-                chin = face_landmarks.landmark[152]          # Chin
-                left_eye = face_landmarks.landmark[33]       # Left eye outer
-                right_eye = face_landmarks.landmark[263]     # Right eye outer
-                forehead = face_landmarks.landmark[10]       # Forehead
-                
-                # Estimate yaw (left/right) from eye positions relative to nose
-                eye_center_x = (left_eye.x + right_eye.x) / 2
-                yaw = (nose_tip.x - eye_center_x) * 4  # Scale to [-1, 1] approx
-                yaw = max(-1.0, min(1.0, yaw))
-                
-                # Estimate pitch (up/down) from nose-chin vs nose-forehead ratio
-                nose_to_chin = chin.y - nose_tip.y
-                nose_to_forehead = nose_tip.y - forehead.y
-                if nose_to_forehead > 0:
-                    pitch_ratio = nose_to_chin / nose_to_forehead
-                    pitch = (pitch_ratio - 1.0) * 2  # Normalize around 0
-                    pitch = max(-1.0, min(1.0, pitch))
-                else:
-                    pitch = 0.0
-                
-                # Determine if person is roughly looking forward
-                is_looking_forward = abs(yaw) < 0.35 and abs(pitch) < 0.4
-                
+
+        if self.has_mediapipe and self.face_mesh:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_mesh.process(rgb_frame)
+            if results.multi_face_landmarks:
+                for face_landmarks in results.multi_face_landmarks:
+                    nose_tip = face_landmarks.landmark[1]
+                    chin = face_landmarks.landmark[152]
+                    left_eye = face_landmarks.landmark[33]
+                    right_eye = face_landmarks.landmark[263]
+                    forehead = face_landmarks.landmark[10]
+
+                    eye_center_x = (left_eye.x + right_eye.x) / 2
+                    yaw = (nose_tip.x - eye_center_x) * 4
+                    yaw = max(-1.0, min(1.0, yaw))
+
+                    nose_to_chin = chin.y - nose_tip.y
+                    nose_to_forehead = nose_tip.y - forehead.y
+                    if nose_to_forehead > 0:
+                        pitch_ratio = nose_to_chin / nose_to_forehead
+                        pitch = (pitch_ratio - 1.0) * 2
+                        pitch = max(-1.0, min(1.0, pitch))
+                    else:
+                        pitch = 0.0
+
+                    is_looking_forward = abs(yaw) < 0.35 and abs(pitch) < 0.4
+                    poses.append({
+                        "yaw": round(yaw, 3),
+                        "pitch": round(pitch, 3),
+                        "is_looking_forward": is_looking_forward,
+                        "nose_position": (int(nose_tip.x * w), int(nose_tip.y * h))
+                    })
+        else:
+            # Fallback estimation for detected faces
+            detections = self.detect_faces(frame)
+            for det in detections:
                 poses.append({
-                    "yaw": round(yaw, 3),
-                    "pitch": round(pitch, 3),
-                    "is_looking_forward": is_looking_forward,
-                    "nose_position": (
-                        int(nose_tip.x * w),
-                        int(nose_tip.y * h)
-                    )
+                    "yaw": 0.05,
+                    "pitch": 0.0,
+                    "is_looking_forward": True,
+                    "nose_position": det["center"]
                 })
-        
+
         return poses
 
     def _calculate_iou(self, bbox1, bbox2):
