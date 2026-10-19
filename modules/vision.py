@@ -37,6 +37,20 @@ class FaceDetector:
         """Initialize the face detector with MediaPipe or OpenCV fallback."""
         self.has_mediapipe = HAS_MEDIAPIPE
         self.face_cascade = None
+        self.yunet_detector = None
+        # Attempt to load OpenCV YuNet DNN detector (modern ONNX face detector)
+        yunet_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "face_detection_yunet_2023mar.onnx")
+        if not os.path.exists(yunet_path):
+            yunet_path = "models/face_detection_yunet_2023mar.onnx"
+        if os.path.exists(yunet_path) and hasattr(cv2, "FaceDetectorYN"):
+            try:
+                self.yunet_detector = cv2.FaceDetectorYN.create(
+                    yunet_path, "", (320, 240),
+                    score_threshold=0.45,
+                    nms_threshold=0.3
+                )
+            except Exception:
+                self.yunet_detector = None
 
         if self.has_mediapipe:
             self.mp_face_detection = mp.solutions.face_detection
@@ -84,11 +98,52 @@ class FaceDetector:
                 - bbox: (x, y, w, h) bounding box
                 - confidence: detection confidence score
                 - center: (cx, cy)
+                - yaw: head yaw angle
+                - is_looking_forward: bool
+                - engagement_state: "engaged" | "distracted"
         """
         h, w, _ = frame.shape
         detections = []
 
-        if self.has_mediapipe and self.face_detection:
+        # 1. Primary Modern Deep Learning Detector: YuNet
+        if self.yunet_detector is not None:
+            try:
+                self.yunet_detector.setInputSize((w, h))
+                _, faces = self.yunet_detector.detect(frame)
+                if faces is not None:
+                    for face in faces:
+                        bx, by, bw, bh = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+                        bx = max(0, bx)
+                        by = max(0, by)
+                        bw = min(bw, w - bx)
+                        bh = min(bh, h - by)
+                        if bw <= 10 or bh <= 10:
+                            continue
+                        score = float(face[14])
+                        
+                        # 5 landmarks: right_eye, left_eye, nose_tip, right_mouth, left_mouth
+                        re_x, re_y = float(face[4]), float(face[5])
+                        le_x, le_y = float(face[6]), float(face[7])
+                        nt_x, nt_y = float(face[8]), float(face[9])
+                        eye_cx = (re_x + le_x) / 2.0
+                        yaw = (nt_x - eye_cx) / max(1.0, (bw * 0.45))
+                        yaw = max(-1.0, min(1.0, yaw))
+                        is_looking = abs(yaw) < 0.38
+                        
+                        detections.append({
+                            "bbox": (bx, by, bw, bh),
+                            "confidence": score,
+                            "center": (bx + bw // 2, by + bh // 2),
+                            "yaw": round(yaw, 3),
+                            "pitch": 0.0,
+                            "is_looking_forward": is_looking,
+                            "engagement_state": "engaged" if is_looking else "distracted"
+                        })
+            except Exception:
+                detections = []
+
+        # 2. MediaPipe fallback
+        if not detections and self.has_mediapipe and self.face_detection:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.face_detection.process(rgb_frame)
             if results.detections:
@@ -108,16 +163,26 @@ class FaceDetector:
                     detections.append({
                         "bbox": (x, y, bw, bh),
                         "confidence": float(confidence),
-                        "center": (x + bw // 2, y + bh // 2)
+                        "center": (x + bw // 2, y + bh // 2),
+                        "yaw": 0.05,
+                        "pitch": 0.0,
+                        "is_looking_forward": True,
+                        "engagement_state": "engaged"
                     })
-        elif self.face_cascade:
+
+        # 3. Haar Cascade fallback
+        elif not detections and self.face_cascade:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
             for (x, y, bw, bh) in faces:
                 detections.append({
                     "bbox": (int(x), int(y), int(bw), int(bh)),
                     "confidence": 0.85,
-                    "center": (int(x + bw // 2), int(y + bh // 2))
+                    "center": (int(x + bw // 2), int(y + bh // 2)),
+                    "yaw": 0.05,
+                    "pitch": 0.0,
+                    "is_looking_forward": True,
+                    "engagement_state": "engaged"
                 })
 
         return detections
@@ -167,14 +232,14 @@ class FaceDetector:
                         "nose_position": (int(nose_tip.x * w), int(nose_tip.y * h))
                     })
         else:
-            # Fallback estimation for detected faces
+            # Fallback estimation for detected faces (utilizes YuNet landmarks when available)
             detections = self.detect_faces(frame)
             for det in detections:
                 poses.append({
-                    "yaw": 0.05,
-                    "pitch": 0.0,
-                    "is_looking_forward": True,
-                    "nose_position": det["center"]
+                    "yaw": det.get("yaw", 0.05),
+                    "pitch": det.get("pitch", 0.0),
+                    "is_looking_forward": det.get("is_looking_forward", True),
+                    "nose_position": det.get("center", (0, 0))
                 })
 
         return poses
@@ -249,6 +314,9 @@ class FaceDetector:
                     "confidence": det["confidence"],
                     "last_seen": frame_time,
                     "is_present": True,
+                    "engagement_state": det.get("engagement_state", "engaged"),
+                    "yaw": det.get("yaw", 0.0),
+                    "pitch": det.get("pitch", 0.0),
                 })
                 # Accumulate visible time
                 if track_info.get("_prev_frame_time"):
@@ -280,6 +348,9 @@ class FaceDetector:
                 "total_visible_time": 0.0,
                 "is_present": True,
                 "_prev_frame_time": frame_time,
+                "engagement_state": det.get("engagement_state", "engaged"),
+                "yaw": det.get("yaw", 0.0),
+                "pitch": det.get("pitch", 0.0),
             }
         
         return self.tracked_faces

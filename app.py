@@ -377,12 +377,18 @@ def create_app():
             # Prepare real-time response for frontend canvas drawing
             faces_info = []
             for fid, info in tracked.items():
+                if not info.get("is_present", False):
+                    continue
+                num_id = fid.replace("face_", "")
                 faces_info.append({
-                    "id": fid,
+                    "id": num_id,
+                    "full_id": fid,
                     "bbox": info["bbox"],
                     "is_present": info["is_present"],
                     "visible_time": round(info["total_visible_time"], 1),
-                    "attendance_marked": info["total_visible_time"] >= tracker.presence_threshold
+                    "attendance_marked": info["total_visible_time"] >= tracker.presence_threshold,
+                    "state": info.get("engagement_state", "engaged"),
+                    "yaw": info.get("yaw", 0.0)
                 })
 
             return jsonify({
