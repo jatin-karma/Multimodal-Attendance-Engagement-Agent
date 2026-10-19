@@ -51,11 +51,13 @@ def start_tunnel():
         print("[*] Starting localtunnel fallback...")
         import subprocess
         try:
+            cmd = "npx -y localtunnel --port " + str(PORT)
             proc = subprocess.Popen(
-                ["npx", "-y", "localtunnel", "--port", str(PORT)],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                shell=True
             )
             for line in proc.stdout:
                 if "url is:" in line:
