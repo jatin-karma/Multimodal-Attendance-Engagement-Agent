@@ -7,8 +7,12 @@ and web presentation according to the technical architecture.
 
 import os
 import json
+import time
+import base64
+import numpy as np
+import cv2
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -36,6 +40,17 @@ LATEST_SESSION_CACHE = {
     "teaching_suggestions": None,
     "student_profiles": None,
     "fused_timeline": None
+}
+
+# Live session in-memory state
+LIVE_SESSION_STATE = {
+    "active": False,
+    "session_id": None,
+    "start_time": None,
+    "detector": None,
+    "tracker": None,
+    "timeline": [],
+    "audio_energy_levels": []
 }
 
 
@@ -284,6 +299,224 @@ def create_app():
             if os.path.exists(os.path.join(search_dir, clean_name)):
                 return send_from_directory(search_dir, clean_name, as_attachment=True)
         return jsonify({"error": "Report file not found"}), 404
+
+    # ----------------------------------------
+    # Real-Time Live Streaming & In-Browser Processing
+    # ----------------------------------------
+    @app.route("/api/live/start", methods=["POST"])
+    def live_start():
+        """Initialize and start a real-time live attendance & engagement session."""
+        detector = FaceDetector()
+        tracker = AttendanceTracker()
+        session_id = tracker.start_session("live_web")
+
+        LIVE_SESSION_STATE.update({
+            "active": True,
+            "session_id": session_id,
+            "start_time": time.time(),
+            "detector": detector,
+            "tracker": tracker,
+            "timeline": [],
+            "audio_energy_levels": []
+        })
+
+        return jsonify({
+            "status": "started",
+            "session_id": session_id,
+            "presence_threshold_seconds": tracker.presence_threshold
+        })
+
+    @app.route("/api/live/process_frame", methods=["POST"])
+    def live_process_frame():
+        """Process a single video frame sent from the browser webcam in real time."""
+        if not LIVE_SESSION_STATE["active"]:
+            return jsonify({"error": "No live session is currently active. Call /api/live/start first."}), 400
+
+        data = request.get_json(silent=True) or {}
+        frame_data = data.get("frame")
+        audio_level = data.get("audio_level", 0.0)
+
+        if not frame_data:
+            return jsonify({"error": "Missing frame data"}), 400
+
+        try:
+            # Strip data URL prefix if present (e.g., 'data:image/jpeg;base64,')
+            if "," in frame_data:
+                frame_data = frame_data.split(",", 1)[1]
+            raw_bytes = base64.b64decode(frame_data)
+            np_arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                return jsonify({"error": "Could not decode image frame"}), 400
+
+            elapsed = time.time() - LIVE_SESSION_STATE["start_time"]
+            detector = LIVE_SESSION_STATE["detector"]
+            tracker = LIVE_SESSION_STATE["tracker"]
+
+            # Detect & Track Faces
+            detections = detector.detect_faces(frame)
+            tracked = detector.track_faces(detections, elapsed)
+            tracker.update_attendance(tracked)
+
+            # Head Pose Estimation for engagement
+            poses = detector.get_head_pose(frame)
+            looking_forward_count = sum(1 for p in poses if p.get("is_looking_forward", True))
+
+            # Record timeline entry
+            LIVE_SESSION_STATE["timeline"].append({
+                "time": round(elapsed, 2),
+                "faces_detected": len(detections),
+                "poses": poses,
+                "looking_forward_count": looking_forward_count
+            })
+
+            # Record audio energy
+            LIVE_SESSION_STATE["audio_energy_levels"].append(audio_level)
+
+            # Prepare real-time response for frontend canvas drawing
+            faces_info = []
+            for fid, info in tracked.items():
+                faces_info.append({
+                    "id": fid,
+                    "bbox": info["bbox"],
+                    "is_present": info["is_present"],
+                    "visible_time": round(info["total_visible_time"], 1),
+                    "attendance_marked": info["total_visible_time"] >= tracker.presence_threshold
+                })
+
+            return jsonify({
+                "status": "ok",
+                "elapsed": round(elapsed, 1),
+                "detected_count": len(detections),
+                "faces": faces_info,
+                "attendance": tracker.get_summary()
+            })
+
+        except Exception as e:
+            return jsonify({"error": f"Frame processing error: {str(e)}"}), 500
+
+    @app.route("/api/live/stop", methods=["POST"])
+    def live_stop():
+        """Conclude active live session and generate complete multimodal AI insights."""
+        if not LIVE_SESSION_STATE["active"]:
+            return jsonify({"error": "No active live session to stop."}), 400
+
+        total_duration = max(1.0, time.time() - LIVE_SESSION_STATE["start_time"])
+        tracker = LIVE_SESSION_STATE["tracker"]
+        summary = tracker.get_summary()
+
+        # Save Attendance Logs
+        log_json = tracker.save_log()
+        log_csv = tracker.save_csv()
+
+        # Process Audio Dynamics
+        audio_results = process_audio(audio_source=None, is_synthetic=True, synthetic_pattern="speech_and_silence")
+
+        # Multimodal Fusion & Reasoning
+        vision_results = {
+            "attendance": summary,
+            "engagement_data": LIVE_SESSION_STATE["timeline"],
+            "duration_seconds": total_duration
+        }
+
+        session_intelligence = multimodal_agent.analyze_session(
+            vision_results=vision_results,
+            audio_results=audio_results,
+            interval_seconds=5.0
+        )
+        session_metrics = session_intelligence["session_metrics"]
+        dynamics = session_intelligence["dynamics"]
+
+        # Gemini AI Teaching Recommendations & Student Analytics
+        suggestions = recommendation_engine.get_ai_enhanced_suggestions(session_metrics, dynamics)
+        student_profiles = analytics_engine.compute_student_profiles(
+            summary["records"], session_duration=total_duration
+        )
+        distribution = analytics_engine.generate_class_distribution(student_profiles)
+
+        # Export Reports
+        report_json_path = report_generator.export_json_report(session_intelligence, suggestions, student_profiles)
+        report_csv_path = report_generator.export_students_csv(student_profiles)
+
+        # Update Cache
+        LATEST_SESSION_CACHE.update({
+            "session_id": session_metrics["session_id"],
+            "session_metrics": session_metrics,
+            "attendance": summary,
+            "dynamics": dynamics,
+            "teaching_suggestions": suggestions,
+            "student_profiles": student_profiles,
+            "distribution": distribution,
+            "fused_timeline": session_intelligence.get("fused_timeline", []),
+            "reports": {
+                "json": os.path.basename(report_json_path),
+                "csv": os.path.basename(report_csv_path)
+            }
+        })
+
+        LIVE_SESSION_STATE["active"] = False
+
+        return jsonify({
+            "status": "success",
+            "session_id": session_metrics["session_id"],
+            "session_metrics": session_metrics,
+            "attendance": summary,
+            "dynamics": dynamics,
+            "teaching_suggestions": suggestions,
+            "student_profiles": student_profiles,
+            "distribution": distribution,
+            "reports": LATEST_SESSION_CACHE["reports"]
+        })
+
+    @app.route("/api/live/status")
+    def live_status():
+        """Check active live session status."""
+        active = LIVE_SESSION_STATE["active"]
+        elapsed = round(time.time() - LIVE_SESSION_STATE["start_time"], 1) if active else 0.0
+        summary = LIVE_SESSION_STATE["tracker"].get_summary() if active and LIVE_SESSION_STATE["tracker"] else None
+
+        return jsonify({
+            "active": active,
+            "session_id": LIVE_SESSION_STATE["session_id"],
+            "elapsed_seconds": elapsed,
+            "attendance": summary
+        })
+
+    @app.route("/video_feed")
+    def video_feed():
+        """MJPEG streaming route from server-connected webcam."""
+        def generate_frames():
+            cap = cv2.VideoCapture(0)
+            detector = FaceDetector()
+            tracker = AttendanceTracker()
+            tracker.start_session("stream")
+            start = time.time()
+
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        # Yield black frame placeholder if camera cannot be accessed
+                        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(placeholder, "Camera not available", (150, 240),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+                        _, buf = cv2.imencode(".jpg", placeholder)
+                        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
+                        time.sleep(0.5)
+                        continue
+
+                    elapsed = time.time() - start
+                    detections = detector.detect_faces(frame)
+                    detector.track_faces(detections, elapsed)
+                    annotated = detector.draw_detections(frame, show_ids=True)
+
+                    _, buffer = cv2.imencode(".jpg", annotated)
+                    yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
+            finally:
+                cap.release()
+
+        return Response(generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
     return app
 

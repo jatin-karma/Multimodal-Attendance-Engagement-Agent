@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: multimodal-agent
+    ports:
+      - "5000:8080"
+    environment:
+      - PORT=8080
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-production-secret-key-change-me}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=gemini-3.8-flash
+    volumes:
+      - ./storage:/app/storage
+      - ./uploads:/app/uploads
+    restart: unless-stopped

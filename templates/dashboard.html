@@ -4,12 +4,44 @@
 <section class="dashboard-header">
     <div>
         <h2>Classroom Intelligence Dashboard</h2>
-        <p class="subtitle">Real-time attendance tracking, multimodal engagement analytics, and AI suggestions</p>
+        <p class="subtitle">Live attendance tracking, multimodal engagement analytics, and Google Gemini AI suggestions</p>
     </div>
     <div class="actions">
-        <button id="btn-run-analysis" class="btn btn-primary" onclick="triggerSessionAnalysis()">
-            ⚡ Run Session Analysis
+        <button id="btn-start-live" class="btn btn-primary" onclick="toggleLiveSession()">
+            🎥 Start Live Webcam Session
         </button>
+        <button id="btn-run-analysis" class="btn btn-secondary" onclick="triggerSessionAnalysis()">
+            ⚡ Run Synthetic Benchmark
+        </button>
+    </div>
+</section>
+
+<!-- Live Studio Card -->
+<section id="live-studio-card" class="live-studio-card" style="display: none;">
+    <div class="live-header">
+        <div class="live-title">
+            <span class="live-dot"></span>
+            <strong>Live Classroom Monitoring</strong>
+            <span id="live-timer" class="badge">00:00</span>
+        </div>
+        <div class="live-stats">
+            <span class="stat-pill" id="live-detected-stat">👤 0 Detected</span>
+            <span class="stat-pill" id="live-present-stat">✅ 0 Present</span>
+            <span class="stat-pill" id="live-audio-stat">🎤 Quiet</span>
+        </div>
+        <button id="btn-stop-live" class="btn btn-danger" onclick="stopLiveSession()">
+            ⏹ Finish &amp; Generate AI Report
+        </button>
+    </div>
+    <div class="video-container">
+        <video id="live-video" autoplay playsinline muted></video>
+        <canvas id="live-canvas"></canvas>
+    </div>
+    <div class="audio-meter-container">
+        <span class="meter-label">Mic Energy:</span>
+        <div class="audio-meter-bar">
+            <div id="audio-meter-fill" class="audio-meter-fill" style="width: 0%;"></div>
+        </div>
     </div>
 </section>
 
@@ -55,7 +87,7 @@
                 <span class="badge" id="ai-source-badge">Engine Ready</span>
             </div>
             <div id="ai-narrative-box" class="ai-box">
-                Click "Run Session Analysis" above or upload video/audio to generate pedagogical suggestions.
+                Click "Start Live Webcam Session" or "Run Synthetic Benchmark" above to generate pedagogical suggestions.
             </div>
             <div id="suggestions-list" class="suggestions-container"></div>
         </div>
@@ -89,7 +121,7 @@
                     </thead>
                     <tbody id="students-table-body">
                         <tr>
-                            <td colspan="5" class="text-center placeholder-text">Run analysis to view student attendance.</td>
+                            <td colspan="5" class="text-center placeholder-text">Run analysis or live session to view student attendance.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -99,6 +131,226 @@
 </div>
 
 <script>
+// Live Session State
+let isLive = false;
+let mediaStream = null;
+let frameInterval = null;
+let timerInterval = null;
+let sessionSeconds = 0;
+let audioContext = null;
+let analyser = null;
+let currentAudioLevel = 0;
+
+// Off-screen canvas for frame extraction
+const captureCanvas = document.createElement('canvas');
+const captureCtx = captureCanvas.getContext('2d');
+
+async function toggleLiveSession() {
+    if (!isLive) {
+        await startLiveSession();
+    } else {
+        await stopLiveSession();
+    }
+}
+
+async function startLiveSession() {
+    const liveCard = document.getElementById('live-studio-card');
+    const startBtn = document.getElementById('btn-start-live');
+    const video = document.getElementById('live-video');
+    const canvas = document.getElementById('live-canvas');
+
+    try {
+        // Request webcam and microphone
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: true
+        });
+
+        video.srcObject = mediaStream;
+        await video.play();
+
+        captureCanvas.width = 640;
+        captureCanvas.height = 480;
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+
+        // Set up Web Audio API for sound level monitoring
+        try {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const audioSource = audioContext.createMediaStreamSource(mediaStream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            audioSource.connect(analyser);
+            monitorAudioLevel();
+        } catch (audioErr) {
+            console.warn('Audio analysis init warning:', audioErr);
+        }
+
+        // Notify Backend
+        const startRes = await fetch('/api/live/start', { method: 'POST' });
+        const startData = await startRes.json();
+
+        isLive = true;
+        liveCard.style.display = 'block';
+        startBtn.textContent = '⏸ Pause Session';
+        startBtn.className = 'btn btn-secondary';
+
+        // Start Timer
+        sessionSeconds = 0;
+        timerInterval = setInterval(() => {
+            sessionSeconds++;
+            const mins = String(Math.floor(sessionSeconds / 60)).padStart(2, '0');
+            const secs = String(sessionSeconds % 60).padStart(2, '0');
+            document.getElementById('live-timer').textContent = `${mins}:${secs}`;
+        }, 1000);
+
+        // Frame Capture Loop (sends 2 frames per second to backend)
+        frameInterval = setInterval(processWebcamFrame, 500);
+        showNotification('Live camera & audio session started!', 'success');
+
+    } catch (err) {
+        showNotification('Webcam access error: ' + err.message, 'error');
+        console.error('Camera error:', err);
+    }
+}
+
+function monitorAudioLevel() {
+    if (!isLive || !analyser) return;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+    }
+    const average = sum / dataArray.length;
+    currentAudioLevel = Math.min(1.0, average / 128.0);
+
+    const meterFill = document.getElementById('audio-meter-fill');
+    if (meterFill) {
+        meterFill.style.width = `${Math.round(currentAudioLevel * 100)}%`;
+    }
+
+    const audioStat = document.getElementById('live-audio-stat');
+    if (audioStat) {
+        if (currentAudioLevel > 0.4) {
+            audioStat.textContent = '🎤 Active Discussion';
+        } else if (currentAudioLevel > 0.15) {
+            audioStat.textContent = '🎤 Speaking';
+        } else {
+            audioStat.textContent = '🎤 Quiet';
+        }
+    }
+
+    requestAnimationFrame(monitorAudioLevel);
+}
+
+async function processWebcamFrame() {
+    if (!isLive) return;
+    const video = document.getElementById('live-video');
+    const canvas = document.getElementById('live-canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (video.readyState < 2) return;
+
+    captureCtx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+    const frameData = captureCanvas.toDataURL('image/jpeg', 0.65);
+
+    try {
+        const res = await fetch('/api/live/process_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                frame: frameData,
+                audio_level: currentAudioLevel
+            })
+        });
+
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Draw live bounding boxes on canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const scaleX = canvas.width / captureCanvas.width;
+        const scaleY = canvas.height / captureCanvas.height;
+
+        let presentCount = 0;
+        (data.faces || []).forEach(face => {
+            const [x, y, w, h] = face.bbox;
+            const drawX = x * scaleX;
+            const drawY = y * scaleY;
+            const drawW = w * scaleX;
+            const drawH = h * scaleY;
+
+            const isPresent = face.attendance_marked;
+            if (isPresent) presentCount++;
+
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = isPresent ? '#00d4aa' : '#ffa500';
+            ctx.strokeRect(drawX, drawY, drawW, drawH);
+
+            // Label background
+            const label = `${face.id} [${isPresent ? 'PRESENT' : face.visible_time + 's'}]`;
+            ctx.font = '14px Inter, sans-serif';
+            const textWidth = ctx.measureText(label).width;
+            ctx.fillStyle = isPresent ? '#00d4aa' : '#ffa500';
+            ctx.fillRect(drawX, drawY > 22 ? drawY - 22 : 0, textWidth + 8, 20);
+
+            // Label text
+            ctx.fillStyle = '#0f0f1a';
+            ctx.fillText(label, drawX + 4, drawY > 22 ? drawY - 7 : 14);
+        });
+
+        // Update live stats
+        document.getElementById('live-detected-stat').textContent = `👤 ${data.detected_count || 0} Detected`;
+        document.getElementById('live-present-stat').textContent = `✅ ${presentCount} Present`;
+
+    } catch (e) {
+        console.warn('Frame processing dropped:', e.message);
+    }
+}
+
+async function stopLiveSession() {
+    const liveCard = document.getElementById('live-studio-card');
+    const startBtn = document.getElementById('btn-start-live');
+    const stopBtn = document.getElementById('btn-stop-live');
+
+    stopBtn.disabled = true;
+    stopBtn.textContent = '⏳ Analyzing Session...';
+
+    clearInterval(frameInterval);
+    clearInterval(timerInterval);
+    isLive = false;
+
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+    if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close();
+    }
+
+    try {
+        const res = await fetch('/api/live/stop', { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok) {
+            updateDashboardUI(data);
+            showNotification('Session concluded! AI reports and attendance saved.', 'success');
+        } else {
+            showNotification(data.error || 'Failed to finalize session.', 'error');
+        }
+    } catch (e) {
+        showNotification('Error stopping session: ' + e.message, 'error');
+    } finally {
+        liveCard.style.display = 'none';
+        startBtn.textContent = '🎥 Start Live Webcam Session';
+        startBtn.className = 'btn btn-primary';
+        stopBtn.disabled = false;
+        stopBtn.textContent = '⏹ Finish & Generate AI Report';
+    }
+}
+
 async function triggerSessionAnalysis() {
     const btn = document.getElementById('btn-run-analysis');
     btn.disabled = true;
@@ -114,7 +366,7 @@ async function triggerSessionAnalysis() {
         const data = await response.json();
         if (response.ok) {
             updateDashboardUI(data);
-            showNotification('Session analysis completed successfully!', 'success');
+            showNotification('Synthetic benchmark completed successfully!', 'success');
         } else {
             showNotification(data.error || 'Analysis failed', 'error');
         }
@@ -122,7 +374,7 @@ async function triggerSessionAnalysis() {
         showNotification('Analysis request error: ' + e.message, 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = '⚡ Run Session Analysis';
+        btn.textContent = '⚡ Run Synthetic Benchmark';
     }
 }
 
@@ -139,7 +391,7 @@ function updateDashboardUI(data) {
     const suggestions = data.teaching_suggestions;
     const aiBox = document.getElementById('ai-narrative-box');
     const sourceBadge = document.getElementById('ai-source-badge');
-    sourceBadge.textContent = suggestions.source === 'gemini_ai' ? 'Google Gemini 2.0 Flash' : 'Rule-Based Engine';
+    sourceBadge.textContent = suggestions.source === 'gemini_ai' ? 'Google Gemini AI Active' : 'Rule-Based Engine';
 
     if (suggestions.ai_insights) {
         aiBox.textContent = suggestions.ai_insights;
